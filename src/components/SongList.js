@@ -4,6 +4,9 @@ import { ListItem } from 'react-native-elements';
 import Sound from 'react-native-sound';
 import { Slider } from 'react-native-elements';
 import { fetchSongs } from '../api/musicApi';
+import RNFS from 'react-native-fs';
+import { check, PERMISSIONS, request, RESULTS } from 'react-native-permissions';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function SongList({ route }) {
   const [songs, setSongs] = useState([]);
@@ -12,6 +15,8 @@ function SongList({ route }) {
   const [seekingValue, setSeekingValue] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [downloadedSongs, setDownloadedSongs] = useState([]);
+
   const { albumId, albumName } = route.params;
 
   useEffect(() => {
@@ -23,22 +28,29 @@ function SongList({ route }) {
     }
     fetchData();
   }, [albumId]);
-
+  useEffect(() => {
+    loadDownloadedSongs();
+  }, []);
   const playNextSong = useCallback(async () => {
     const nextIndex = (currentIndex + 1) % songs.length;
     await playSong(songs[nextIndex].url);
     setCurrentIndex(nextIndex);
   }, [currentIndex, songs]);
 
-  async function playSong(uri) {
+  async function playSong(uri, songName) {
     const baseUrl = 'https://eelasongs.com/';
     const fullUrl = baseUrl + uri;
-    
+    const localPath = `${RNFS.ExternalStorageDirectoryPath}/Download/${songName}.mp3`;
+
+    const isLocalFile = await RNFS.exists(localPath);
+
+    const playUri = isLocalFile ? localPath : fullUrl;
+
     if (sound) {
       sound.release();
     }
 
-    const newSound = new Sound(fullUrl, null, (error) => {
+    const newSound = new Sound(playUri, null, (error) => {
       if (error) {
         console.log('Failed to load the sound', error);
         return;
@@ -59,7 +71,60 @@ function SongList({ route }) {
       newSound.getCurrentTime((seconds) => setCurrentTime(seconds));
     });
   }
-
+  async function downloadSong(uri, songName) {
+    try {
+      const granted = await check(PERMISSIONS.ANDROID.WRITE_EXTERNAL_STORAGE);
+      if (granted === RESULTS.GRANTED) {
+        const baseUrl = 'https://eelasongs.com/';
+        const fullUrl = baseUrl + uri;
+        const downloadPath = `${RNFS.ExternalStorageDirectoryPath}/Download/${songName}.mp3`;
+        const options = {
+          fromUrl: fullUrl,
+          toFile: downloadPath,
+          progressDivider: 50,
+          background: true,
+        };
+        const download = await RNFS.downloadFile(options);
+  
+        download.promise
+          .then(async (res) => {
+            console.log('Song downloaded:', downloadPath);
+            const newDownloadedSongs = [...downloadedSongs, songName];
+            setDownloadedSongs(newDownloadedSongs);
+  
+            try {
+              await AsyncStorage.setItem('@downloaded_songs', JSON.stringify(newDownloadedSongs));
+            } catch (error) {
+              console.log('Error saving downloaded songs:', error);
+            }
+          })
+          .catch((err) => {
+            console.log('Error downloading song:', err);
+          });
+      } else {
+        const result = await request(PERMISSIONS.ANDROID.WRITE_EXTERNAL_STORAGE);
+        if (result === RESULTS.GRANTED) {
+          downloadSong(uri, songName);
+        } else {
+          console.log('Permission denied');
+        }
+      }
+    } catch (error) {
+      console.log('Error:', error);
+    }
+  }
+  
+  async function loadDownloadedSongs() {
+    try {
+      const value = await AsyncStorage.getItem('@downloaded_songs');
+      if (value !== null) {
+        setDownloadedSongs(JSON.parse(value));
+      }
+    } catch (error) {
+      console.log('Error loading downloaded songs:', error);
+    }
+  }
+  
   async function stopSong() {
     if (sound) {
       sound.stop(() => {
@@ -114,12 +179,20 @@ function SongList({ route }) {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }
   const renderItem = ({ item, index }) => (
-    <ListItem bottomDivider onPress={() => playSong(item.url)}>
-      <ListItem.Content>
-        <ListItem.Title>{item.name}</ListItem.Title>
-      </ListItem.Content>
-      <ListItem.Chevron />
-    </ListItem>
+    <ListItem bottomDivider onPress={() => playSong(item.url, item.name)}>
+    <ListItem.Content>
+      <ListItem.Title>{item.name}</ListItem.Title>
+    </ListItem.Content>
+    <ListItem.Chevron />
+    {!downloadedSongs.includes(item.name) && (
+      <TouchableOpacity onPress={() => downloadSong(item.url, item.name)}>
+        <Text>Download</Text>
+      </TouchableOpacity>
+    )}
+    {downloadedSongs.includes(item.name) && (
+      <Text style={styles.downloadedLabel}>Downloaded</Text>
+    )}
+  </ListItem>
   );
 
   return (
@@ -185,6 +258,10 @@ const styles = StyleSheet.create({
   },
   sliderContainer: {
     marginTop: 20,
+  },
+  downloadedLabel: {
+    color: 'green',
+    fontWeight: 'bold',
   },
 });
 
