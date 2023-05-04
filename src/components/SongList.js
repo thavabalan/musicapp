@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback,useContext } from 'react';
 import { View, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
 import { ListItem } from 'react-native-elements';
 import Sound from 'react-native-sound';
@@ -7,15 +7,18 @@ import { fetchSongs } from '../api/musicApi';
 import RNFS from 'react-native-fs';
 import { check, PERMISSIONS, request, RESULTS } from 'react-native-permissions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import FontAwesome from 'react-native-vector-icons/FontAwesome';
+import { usePlayer } from '../context/PlayerContext';
+
 
 function SongList({ route }) {
-  const [songs, setSongs] = useState([]);
-  const [sound, setSound] = useState(null);
-  const [currentIndex, setCurrentIndex] = useState(-1);
   const [seekingValue, setSeekingValue] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [downloadedSongs, setDownloadedSongs] = useState([]);
+  const [playingSong, setPlayingSong] = useState(null);
+  const { currentSong, setCurrentSong,duration, isPlaying, setIsPlaying, playNextSong, playPreviousSong,songs,setSongs,sound,setSound,playSong,currentIndex,setCurrentIndex,downloadedSongs,setDownloadedSongs } = usePlayer();
+
+
+
+
 
   const { albumId, albumName } = route.params;
 
@@ -31,46 +34,49 @@ function SongList({ route }) {
   useEffect(() => {
     loadDownloadedSongs();
   }, []);
-  const playNextSong = useCallback(async () => {
-    const nextIndex = (currentIndex + 1) % songs.length;
-    await playSong(songs[nextIndex].url);
-    setCurrentIndex(nextIndex);
-  }, [currentIndex, songs]);
 
-  async function playSong(uri, songName) {
-    const baseUrl = 'https://eelasongs.com/';
-    const fullUrl = baseUrl + uri;
-    const localPath = `${RNFS.ExternalStorageDirectoryPath}/Download/${songName}.mp3`;
 
-    const isLocalFile = await RNFS.exists(localPath);
 
-    const playUri = isLocalFile ? localPath : fullUrl;
-
-    if (sound) {
-      sound.release();
-    }
-
-    const newSound = new Sound(playUri, null, (error) => {
-      if (error) {
-        console.log('Failed to load the sound', error);
-        return;
+  const resume = () => {
+    return new Promise((resolve, reject) => {
+      if (sound) {
+        sound.play((success) => {
+          if (success) {
+            console.log('Resumed successfully');
+            setIsPlaying(true);
+            resolve();
+          } else {
+            console.log('Failed to resume');
+            reject();
+          }
+        });
+      } else {
+        reject();
       }
-      
-      setDuration(newSound.getDuration());
-      setSound(newSound);
-      newSound.play((success) => {
-        if (success) {
-          console.log('Successfully finished playing');
-          playNextSong();
-        } else {
-          console.log('Playback failed due to audio decoding errors');
-        }
-      });
-
-      newSound.setNumberOfLoops(0);
-      newSound.getCurrentTime((seconds) => setCurrentTime(seconds));
     });
-  }
+  };
+  
+  const pause = () => {
+    return new Promise((resolve, reject) => {
+      if (sound) {
+        sound.pause((success) => {
+          if (success) {
+            console.log('Paused successfully');
+            setIsPlaying(false);
+            resolve();
+          } else {
+            console.log('Failed to pause');
+            reject();
+          }
+        });
+      } else {
+        reject();
+      }
+    });
+  };
+  
+  
+ 
   async function downloadSong(uri, songName) {
     try {
       const granted = await check(PERMISSIONS.ANDROID.WRITE_EXTERNAL_STORAGE);
@@ -178,22 +184,68 @@ function SongList({ route }) {
     const remainingSeconds = Math.floor(seconds % 60);
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }
-  const renderItem = ({ item, index }) => (
-    <ListItem bottomDivider onPress={() => playSong(item.url, item.name)}>
-    <ListItem.Content>
-      <ListItem.Title>{item.name}</ListItem.Title>
-    </ListItem.Content>
-    <ListItem.Chevron />
-    {!downloadedSongs.includes(item.name) && (
-      <TouchableOpacity onPress={() => downloadSong(item.url, item.name)}>
-        <Text>Download</Text>
+  const PlaybackControls = () => (
+    <View style={styles.playbackControls}>
+      <TouchableOpacity onPress={playPreviousSong}>
+        <FontAwesome name="step-backward" size={24} color="white" />
       </TouchableOpacity>
+      {isPlaying ? (
+     <TouchableOpacity
+     onPress={() => {
+       pause().catch((error) => {
+         console.log("Error pausing:", error);
+       });
+     }}
+   >
+     <FontAwesome name="pause" size={24} color="white" />
+   </TouchableOpacity>
+    ) : (
+      <TouchableOpacity
+      onPress={() => {
+        if (!playingSong) {
+          setCurrentIndex(0);
+          playSong(songs[0].url, songs[0].name);
+        } else {
+          resume().catch((error) => {
+            console.log("Error resuming:", error);
+          });
+        }
+      }}
+    >
+      <FontAwesome name="play" size={24} color="white" />
+    </TouchableOpacity>
+      
     )}
-    {downloadedSongs.includes(item.name) && (
-      <Text style={styles.downloadedLabel}>Downloaded</Text>
-    )}
-  </ListItem>
+      <TouchableOpacity onPress={playNextSong}>
+        <FontAwesome name="step-forward" size={24} color="white" />
+      </TouchableOpacity>
+    </View>
   );
+  
+  const renderItem = ({ item, index }) => (
+    <TouchableOpacity
+      style={styles.listItem}
+      onPress={() => playSong(item.url, item.name)}
+    >
+      <View>
+        <Text style={styles.songName}>{item.name}</Text>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {!downloadedSongs.includes(item.name) && (
+          <TouchableOpacity
+            style={styles.downloadButton}
+            onPress={() => downloadSong(item.url, item.name)}
+          >
+            <Text style={{ color: 'white', fontWeight: 'bold' }}>Download</Text>
+          </TouchableOpacity>
+        )}
+        {downloadedSongs.includes(item.name) && (
+          <Text style={styles.downloadedLabel}>Downloaded</Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+  
 
   return (
     <View style={styles.container}>
@@ -215,7 +267,9 @@ function SongList({ route }) {
           <Text>Stop</Text>
         </TouchableOpacity>
       </View>
+     
       <View style={styles.sliderContainer}>
+      <PlaybackControls />
         <Slider
           value={seekingValue}
           onValueChange={setSeekingValue}
@@ -231,6 +285,7 @@ function SongList({ route }) {
       <Text>{formatTime(duration)}</Text>
         </View>
       </View>
+      
     </View>
   );
 }
@@ -238,31 +293,51 @@ function SongList({ route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: 16,
+    backgroundColor: '#121212',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
     marginVertical: 16,
+    color: 'white',
   },
-  playerControls: {
+  listItem: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginVertical: 16,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#282828',
   },
-  controlButton: {
-    padding: 8,
+  songName: {
+    fontSize: 18,
+    color: 'white',
+  },
+  artistName: {
+    fontSize: 14,
+    color: '#b3b3b3',
+  },
+  downloadButton: {
     backgroundColor: '#1DB954',
-    borderRadius: 8,
-  },
-  sliderContainer: {
-    marginTop: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
   downloadedLabel: {
-    color: 'green',
+    color: '#1DB954',
     fontWeight: 'bold',
   },
+  playbackControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#282828',
+  },
 });
+
 
 export default SongList;

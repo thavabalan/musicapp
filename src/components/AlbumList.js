@@ -7,16 +7,26 @@ import { fetchAlbumsByGenre } from '../api/musicApi';
 function AlbumList({ navigation,route }) {
   const [albums, setAlbums] = useState([]);
   const { genreId } = route.params;
+  const [page, setPage] = useState(1);
+const [loading, setLoading] = useState(false);
 
+async function fetchData() {
+  setLoading(true);
+  const data = await fetchAlbumsByGenre(genreId, page);
+  if (data) {
+    setAlbums((prevAlbums) => [...prevAlbums, ...data.artists.data]);
+    setLoading(false);
+  }
+}
+  
   useEffect(() => {
-    async function fetchData() {
-      const data = await fetchAlbumsByGenre(genreId);
-      if (data) {
-        setAlbums(data.artists.data);
-      }
-    }
     fetchData();
-  }, [genreId]);
+  }, [genreId, page]);
+  const handleLoadMore = () => {
+    if (!loading) {
+      setPage((prevPage) => prevPage + 1);
+    }
+  };
   const renderItem = ({ item }) => {
     
     const imageUrl = 'https://eelasongs.com/' + item.image;
@@ -41,6 +51,8 @@ function AlbumList({ navigation,route }) {
             keyExtractor={(item) => item.id.toString()}
             numColumns={2}
             contentContainerStyle={styles.albumList}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={1}
           />
         )}
       </View>

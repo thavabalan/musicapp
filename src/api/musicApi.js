@@ -12,9 +12,9 @@ export async function fetchGenres() {
   }
 }
 
-export async function fetchAlbumsByGenre(genreId) {
+export async function fetchAlbumsByGenre(genreId, page = 1) {
   try {
-    const response = await fetch(`${API_BASE_URL}/secure/genres/${genreId}/`);
+    const response = await fetch(`${API_BASE_URL}/secure/genres/${genreId}/?page=${page}`);
     const json = await response.json();
     
     return json;
