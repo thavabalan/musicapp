@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback,useContext } from 'react';
-import { View, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet,ActivityIndicator } from 'react-native';
 import { ListItem } from 'react-native-elements';
 import Sound from 'react-native-sound';
 import { Slider } from 'react-native-elements';
@@ -9,13 +9,14 @@ import { check, PERMISSIONS, request, RESULTS } from 'react-native-permissions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import { usePlayer } from '../context/PlayerContext';
+import { Header } from 'react-native-elements';
 
 
 function SongList({ route }) {
   const [seekingValue, setSeekingValue] = useState(0);
-  const [playingSong, setPlayingSong] = useState(null);
-  const { currentSong, setCurrentSong,duration, isPlaying, setIsPlaying, playNextSong, playPreviousSong,songs,setSongs,sound,setSound,playSong,currentIndex,setCurrentIndex,downloadedSongs,setDownloadedSongs } = usePlayer();
+  const [downloadProgress, setDownloadProgress] = useState({});
 
+  const { currentSong,currentTime,setCurrentTime, setCurrentSong,duration, isPlaying, setIsPlaying, playNextSong, playPreviousSong,songs,setSongs,sound,setSound,playSong,currentIndex,setCurrentIndex,downloadedSongs,setDownloadedSongs,addSongsToQueue } = usePlayer();
 
 
 
@@ -24,8 +25,10 @@ function SongList({ route }) {
 
   useEffect(() => {
     async function fetchData() {
+      console.log(albumId)
       const data = await fetchSongs(albumId);
       if (data) {
+        
         setSongs(data.albums.data[0].tracks);
       }
     }
@@ -35,67 +38,39 @@ function SongList({ route }) {
     loadDownloadedSongs();
   }, []);
 
-
-
-  const resume = () => {
-    return new Promise((resolve, reject) => {
-      if (sound) {
-        sound.play((success) => {
-          if (success) {
-            console.log('Resumed successfully');
-            setIsPlaying(true);
-            resolve();
-          } else {
-            console.log('Failed to resume');
-            reject();
-          }
-        });
-      } else {
-        reject();
-      }
-    });
-  };
-  
-  const pause = () => {
-    return new Promise((resolve, reject) => {
-      if (sound) {
-        sound.pause((success) => {
-          if (success) {
-            console.log('Paused successfully');
-            setIsPlaying(false);
-            resolve();
-          } else {
-            console.log('Failed to pause');
-            reject();
-          }
-        });
-      } else {
-        reject();
-      }
-    });
-  };
-  
   
  
-  async function downloadSong(uri, songName) {
+  async function downloadSong(song) {
     try {
       const granted = await check(PERMISSIONS.ANDROID.WRITE_EXTERNAL_STORAGE);
       if (granted === RESULTS.GRANTED) {
         const baseUrl = 'https://eelasongs.com/';
-        const fullUrl = baseUrl + uri;
-        const downloadPath = `${RNFS.ExternalStorageDirectoryPath}/Download/${songName}.mp3`;
+        const fullUrl = baseUrl + song.url;
+        const downloadPath = `${RNFS.ExternalStorageDirectoryPath}/Download/${song.name}.mp3`;
         const options = {
           fromUrl: fullUrl,
           toFile: downloadPath,
           progressDivider: 50,
           background: true,
+          progress: (res) => {
+            const percentage = (res.bytesWritten / res.contentLength) * 100;
+            setDownloadProgress((prev) => ({ ...prev, [song.name]: percentage }));
+          },
         };
+  
         const download = await RNFS.downloadFile(options);
   
         download.promise
           .then(async (res) => {
             console.log('Song downloaded:', downloadPath);
-            const newDownloadedSongs = [...downloadedSongs, songName];
+            const newDownloadedSong = {
+              name: song.name,
+              url: song.url,
+              album_name: song.album_name,
+              image: song.image,
+              duration: song.duration,
+            };
+            const newDownloadedSongs = [...downloadedSongs, newDownloadedSong];
             setDownloadedSongs(newDownloadedSongs);
   
             try {
@@ -110,7 +85,7 @@ function SongList({ route }) {
       } else {
         const result = await request(PERMISSIONS.ANDROID.WRITE_EXTERNAL_STORAGE);
         if (result === RESULTS.GRANTED) {
-          downloadSong(uri, songName);
+          downloadSong(song);
         } else {
           console.log('Permission denied');
         }
@@ -131,116 +106,36 @@ function SongList({ route }) {
     }
   }
   
-  async function stopSong() {
-    if (sound) {
-      sound.stop(() => {
-        sound.release();
-        setSound(null);
-      });
-    }
-  }
 
-  function onSlidingStart() {
-    if (sound) {
-      sound.pause();
-    }
-  }
 
-  function onSlidingComplete(value) {
-    if (sound) {
-      seek(value);
-      sound.play();
-    }
-  }
-
-  function seek(value) {
-    if (sound) {
-      const newPosition = value * duration;
-      sound.setCurrentTime(newPosition);
-    }
-  }
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (sound) {
-        sound.getCurrentTime((seconds) => {
-          setCurrentTime(seconds);
-          setSeekingValue(seconds / duration);
-        });
-      }
-    }, 1000);
-
-    return () => {
-      clearInterval(interval);
-      if (sound) {
-        console.log('Releasing Sound');
-        sound.release();
-      }
-    };
-  }, [sound, duration]);
-
-  function formatTime(seconds) {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.floor(seconds % 60);
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  }
-  const PlaybackControls = () => (
-    <View style={styles.playbackControls}>
-      <TouchableOpacity onPress={playPreviousSong}>
-        <FontAwesome name="step-backward" size={24} color="white" />
-      </TouchableOpacity>
-      {isPlaying ? (
-     <TouchableOpacity
-     onPress={() => {
-       pause().catch((error) => {
-         console.log("Error pausing:", error);
-       });
-     }}
-   >
-     <FontAwesome name="pause" size={24} color="white" />
-   </TouchableOpacity>
-    ) : (
-      <TouchableOpacity
-      onPress={() => {
-        if (!playingSong) {
-          setCurrentIndex(0);
-          playSong(songs[0].url, songs[0].name);
-        } else {
-          resume().catch((error) => {
-            console.log("Error resuming:", error);
-          });
-        }
-      }}
-    >
-      <FontAwesome name="play" size={24} color="white" />
-    </TouchableOpacity>
-      
-    )}
-      <TouchableOpacity onPress={playNextSong}>
-        <FontAwesome name="step-forward" size={24} color="white" />
-      </TouchableOpacity>
-    </View>
-  );
   
   const renderItem = ({ item, index }) => (
     <TouchableOpacity
       style={styles.listItem}
-      onPress={() => playSong(item.url, item.name)}
+      onPress={() => {
+        setCurrentIndex(index);
+        playSong(item);
+        addSongsToQueue(songs.slice(index + 1));
+      }}
     >
       <View>
-        <Text style={styles.songName}>{item.name}</Text>
+        <Text style={styles.songName}> {item.name.length > 25 ? item.name.substring(0, 25) + '...' : item.name}</Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        {!downloadedSongs.includes(item.name) && (
+        {!downloadedSongs.some((s) => s.name === item.name) && (
           <TouchableOpacity
             style={styles.downloadButton}
-            onPress={() => downloadSong(item.url, item.name)}
+            onPress={() => downloadSong(item)}
           >
-            <Text style={{ color: 'white', fontWeight: 'bold' }}>Download</Text>
+            {downloadProgress[item.name] ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <FontAwesome name="download" size={24} color="white" />
+            )}
           </TouchableOpacity>
         )}
-        {downloadedSongs.includes(item.name) && (
-          <Text style={styles.downloadedLabel}>Downloaded</Text>
+        {downloadedSongs.some((s) => s.name === item.name) && (
+            <FontAwesome name="check" size={24} color="#1DB954" />
         )}
       </View>
     </TouchableOpacity>
@@ -249,7 +144,16 @@ function SongList({ route }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Songs in {albumName}:</Text>
+          <Header
+        centerComponent={{
+          text: albumName,
+          style: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+        }}
+        containerStyle={{
+          backgroundColor: '#1DB954',
+          justifyContent: 'space-around',
+        }}
+      />
       {songs.length === 0 ? (
         <Text>No songs found.</Text>
       ) : (
@@ -259,33 +163,9 @@ function SongList({ route }) {
           keyExtractor={(item) => item.id.toString()}
         />
       )}
-      <View style={styles.playerControls}>
-        <TouchableOpacity onPress={playNextSong} style={styles.controlButton}>
-          <Text>Next</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={stopSong} style={styles.controlButton}>
-          <Text>Stop</Text>
-        </TouchableOpacity>
-      </View>
+ 
      
-      <View style={styles.sliderContainer}>
-      <PlaybackControls />
-        <Slider
-          value={seekingValue}
-          onValueChange={setSeekingValue}
-          onSlidingStart={onSlidingStart}
-          onSlidingComplete={onSlidingComplete}
-          minimumValue={0}
-          maximumValue={1}
-          step={0.01}
-          style={{ width: '100%' }}
-        />
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text>{formatTime(currentTime)}</Text>
-      <Text>{formatTime(duration)}</Text>
-        </View>
-      </View>
-      
+
     </View>
   );
 }
@@ -294,6 +174,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
+ 
   },
   title: {
     fontSize: 24,

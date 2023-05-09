@@ -18,7 +18,9 @@ const Tab = createBottomTabNavigator();
 function HomeStack() {
   return (
 
-    <Stack.Navigator initialRouteName="GenreList">
+    <Stack.Navigator initialRouteName="GenreList" screenOptions={{
+      headerShown: false,
+    }}>
 
       <Stack.Screen name="GenreList" component={GenreList} />
       <Stack.Screen name="AlbumList" component={AlbumList} />
@@ -35,7 +37,19 @@ function App() {
 
     <NavigationContainer>
       <View style={{ flex: 1 }}>
-      <Tab.Navigator initialRouteName="Home">
+      <Tab.Navigator
+          initialRouteName="Home"
+          screenOptions={{
+            activeTintColor: '#1DB954',
+            inactiveTintColor: 'black',
+            style: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)', // Add this line
+              borderTopColor: 'rgba(255, 255, 255, 0.1)', // Add this line
+            },
+            headerShown: false
+          }}
+          barStyle={{ backgroundColor: '#ffff' }}
+        >
         <Tab.Screen name="Home" component={HomeStack} options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ color }) => (
